@@ -286,7 +286,7 @@ if selected == range_label:
             "Número de Focos": "sum",
             "satelite": lambda x: x.nunique() if x.notna().any() else 0,
         }).rename(columns={"satelite": "Satélites"}).reset_index().sort_values("Número de Focos", ascending=False)
-        st.dataframe(df_resumo, width='stretch', hide_index=True)
+        st.dataframe(df_resumo, use_container_width=True, hide_index=True)
 
         st.markdown(horizontal_bar, True)
 
