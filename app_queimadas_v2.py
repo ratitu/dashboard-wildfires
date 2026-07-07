@@ -1,5 +1,5 @@
 import streamlit as st
-from streamlit_folium import folium_static
+from streamlit_folium import st_folium
 import streamlit_option_menu
 from streamlit_option_menu import option_menu
 from st_social_media_links import SocialMediaIcons
@@ -395,5 +395,5 @@ if selected == "Mapa":
         st.markdown(f"**Período:** {periodo[0]} a {periodo[1]}")
 
     mapa = plot_mapa(municipios_sel if municipios_sel else None)
-    folium_static(mapa, width=800, height=500)
+    st_folium(mapa, width=800, height=500)
     st.markdown(horizontal_bar, True)
