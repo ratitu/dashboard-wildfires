@@ -20,15 +20,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+if "dias" not in st.session_state:
+    st.session_state.dias = 15
+
 URL_BASE = "https://dataserver-coids.inpe.br/queimadas/queimadas/focos/csv/diario/Brasil"
 
 @st.cache_data(ttl=3600)
-def load_data():
+def load_data(dias):
     rmc = gpd.read_file("dataset/RMC_Municipios_2024.shp")
 
     hoje = datetime.now()
     registros = []
-    for i in range(15):
+    for i in range(dias):
         data = hoje - timedelta(days=i)
         url = f"{URL_BASE}/focos_diario_br_{data.strftime('%Y%m%d')}.csv"
         try:
@@ -78,7 +81,7 @@ def load_data():
 
     return df_q, list_municipios, (data_inicio, data_fim), rmc
 
-df_queimadas, list_municipios, periodo, rmc = load_data()
+df_queimadas, list_municipios, periodo, rmc = load_data(st.session_state.dias)
 
 st.markdown(
     """
@@ -169,10 +172,13 @@ def plot_mapa(municipios_selecionados=None):
 
 horizontal_bar = "<hr style='margin-top: 0; margin-bottom: 0; height: 1px; border: 1px solid #FF9100DA;'><br>"
 
+range_label = f"Últimos {st.session_state.dias} dias"
+
 with st.sidebar:
+    st.selectbox("Período:", [15, 30], index=0, key="dias")
     selected = option_menu(
         menu_title="Navegação",
-        options=["Início", "Últimos 15 dias", "Municípios e Satélites", "Mapa"],
+        options=["Início", range_label, "Municípios e Satélites", "Mapa"],
         icons=["house", "bar-chart", "geo-alt", "map"],
         menu_icon="cast",
         default_index=0,
@@ -182,15 +188,15 @@ if selected == "Início":
     st.subheader("🔥 Monitoramento de Queimadas na Região Metropolitana de Campinas")
 
     st.markdown(
-        """
+        f"""
         <p style="font-size:15px;">
         Este aplicativo apresenta dados em tempo quase real dos focos de queimadas na
         <b>Região Metropolitana de Campinas (RMC)</b>.
         Os dados são obtidos automaticamente do <b>INPE</b> (Instituto Nacional de Pesquisas Espaciais)
-        e abrangem os <b>últimos 15 dias</b>.
+        e abrangem os <b>últimos {st.session_state.dias} dias</b>.
         </p>
         <ul style="font-size:15px;">
-        <li><b>Últimos 15 dias</b>: evolução diária dos focos de queimadas.</li>
+        <li><b>{range_label}</b>: evolução diária dos focos de queimadas.</li>
         <li><b>Municípios e Satélites</b>: distribuição por município e satélite de origem.</li>
         <li><b>Mapa</b>: mapa interativo com mapa de calor e marcadores dos focos.</li>
         </ul>
@@ -200,10 +206,10 @@ if selected == "Início":
     st.markdown("---")
 
     if df_queimadas is None:
-        st.warning("Nenhum foco de queimada detectado na RMC nos últimos 15 dias.")
+        st.warning(f"Nenhum foco de queimada detectado na RMC nos últimos {st.session_state.dias} dias.")
     else:
         st.markdown(
-            '<p style="font-size:15px;">Panorama dos últimos 15 dias:</p>',
+            f'<p style="font-size:15px;">Panorama dos últimos {st.session_state.dias} dias:</p>',
             unsafe_allow_html=True
         )
 
@@ -245,7 +251,7 @@ if selected == "Início":
 
         st.markdown("---")
 
-if selected == "Últimos 15 dias":
+if selected == range_label:
     st.subheader("Evolução Diária dos Focos de Queimadas")
 
     if df_queimadas is None:
