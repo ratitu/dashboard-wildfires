@@ -280,13 +280,13 @@ if selected == range_label:
             hoverlabel=dict(font_size=12, font_color="white"),
             hovermode="x unified"
         )
-        st.plotly_chart(fig_diario, use_container_width=True)
+        st.plotly_chart(fig_diario, width='stretch')
 
         df_resumo = df_queimadas.groupby("Municipio").agg({
             "Número de Focos": "sum",
             "satelite": lambda x: x.nunique() if x.notna().any() else 0,
         }).rename(columns={"satelite": "Satélites"}).reset_index().sort_values("Número de Focos", ascending=False)
-        st.dataframe(df_resumo, use_container_width=True, hide_index=True)
+        st.dataframe(df_resumo, width='stretch', hide_index=True)
 
         st.markdown(horizontal_bar, True)
 
@@ -329,7 +329,7 @@ if selected == "Municípios e Satélites":
             yaxis={"categoryorder": "total ascending"},
             hoverlabel=dict(font_size=12, font_color="white")
         )
-        st.plotly_chart(fig_mun, use_container_width=True)
+        st.plotly_chart(fig_mun, width='stretch')
 
         if "satelite" in df_queimadas.columns:
             df_sat = (
@@ -347,7 +347,7 @@ if selected == "Municípios e Satélites":
                 height=400
             )
             fig_sat.update_layout(hoverlabel=dict(font_size=12, font_color="white"))
-            st.plotly_chart(fig_sat, use_container_width=True)
+            st.plotly_chart(fig_sat, width='stretch')
 
         if "bioma" in df_queimadas.columns:
             df_bio = (
@@ -365,7 +365,7 @@ if selected == "Municípios e Satélites":
                 height=300
             )
             fig_bio.update_layout(hoverlabel=dict(font_size=12, font_color="white"))
-            st.plotly_chart(fig_bio, use_container_width=True)
+            st.plotly_chart(fig_bio, width='stretch')
 
         st.markdown(horizontal_bar, True)
 
