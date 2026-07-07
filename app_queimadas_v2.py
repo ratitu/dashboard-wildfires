@@ -2,7 +2,6 @@ import streamlit as st
 from streamlit_folium import st_folium
 import streamlit_option_menu
 from streamlit_option_menu import option_menu
-from st_social_media_links import SocialMediaIcons
 import pandas as pd
 import geopandas as gpd
 import plotly.express as px
