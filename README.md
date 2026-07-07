@@ -1,30 +1,19 @@
 <div align="center">
   <h1 style="text-align: center; font-size: 2em;">
-    🔥 Monitoramento de Focos de Queimadas em Itajubá-MG 🚒
+    🔥 Monitoramento de Focos de Queimadas na Região Metropolitana de Campinas 🚒
   </h1>
 </div>
 
-<p>
-  Os resultados deste dashboard podem ser observados no artigo:  
-  <a href="https://periodicos.ufpe.br/revistas/index.php/rbgfe/article/view/262758" 
-     target="_blank" style="color: white; font-weight: bold;">
-    Caracterização das Queimadas no Município de Itajubá, MG
-  </a>, publicado na  
-  <em>Revista Brasileira de Geografia Física</em> em 2025.
+<p align="center">
+  Dashboard em tempo real com dados do <b>INPE</b> (Instituto Nacional de Pesquisas Espaciais) dos focos de queimadas
+  na <b>Região Metropolitana de Campinas (RMC)</b> — último 15 dias.
 </p>
 
-<p>
-  Os dados de focos de queimadas em Itajubá-MG são provenientes do Corpo de Bombeiros de Itajubá e  
-  referem-se ao período entre 2019 e 2024.  
-</p>
-
-  <p>
 <div align="center">
-    <a href="https://app-queimadas.streamlit.app/" target="_blank">
-      <strong>🔥 Visite o App</strong>
-    </a>
+  <a href="https://app-queimadas.streamlit.app/" target="_blank">
+    <strong>🔥 Visite o App</strong>
+  </a>
 </div>
-  </p>
 
 <br>
 
@@ -36,18 +25,12 @@
 
 <hr>
 
-<div align="center">
-  <img src="https://github.com/geovanecarlos/app_queimadas_v2/blob/main/mapa%20do%20foco%20de%20queimadas.png" 
-       alt="Mapa de Focos de Queimadas"/>
-</div>
-
-
 ## 💻 Utilização
 
 1. Clone o repositório:
 
 ```
-git clone https://github.com/geovanecarlos/app_queimadas_v2.git
+git clone https://github.com/ratitu/dashboard-wildfires.git
 ```
 
 2. Instale as dependências:
@@ -56,15 +39,18 @@ git clone https://github.com/geovanecarlos/app_queimadas_v2.git
 pip install -r requirements.txt
 ```
 
-3. Entre na pasta `app_queimadas_v2`:
-
-```
-cd app_queimadas_v2/
-```
-
 3. Rode o app:
+
 ```
 streamlit run app_queimadas_v2.py
 ```
 
 4. Acesse o app em seu navegador em: http://localhost:8501
+
+> **Nota:** Requer conexão com a internet para baixar os dados mais recentes do INPE.
+
+## 📡 Fonte dos dados
+
+- **Focos de queimadas**: [INPE — Programa Queimadas](https://dataserver-coids.inpe.br/queimadas/queimadas/focos/csv/diario/Brasil/)
+  (CSV diário, últimos 15 dias, atualizado a cada passagem de satélite)
+- **Limite municipal**: RMC — IBGE 2024 (EPSG:4674)
