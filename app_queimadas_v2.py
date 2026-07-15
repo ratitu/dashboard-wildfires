@@ -293,18 +293,51 @@ if selected == range_label:
 
             df_frp = df_queimadas[["Municipio", "satelite", "bioma", "frp"]].copy()
             df_frp["Data"] = df_queimadas.index.strftime("%d/%m/%Y %H:%M")
+            df_frp["Latitude"] = df_queimadas["Latitude"]
+            df_frp["Longitude"] = df_queimadas["Longitude"]
             df_frp = df_frp.rename(columns={
                 "Municipio": "Município",
                 "satelite": "Satélite",
                 "bioma": "Bioma",
                 "frp": "FRP"
             })
-            df_frp = df_frp[["Município", "Data", "Satélite", "Bioma", "FRP"]]
+            df_frp = df_frp[["Município", "Data", "Satélite", "Bioma", "FRP", "Latitude", "Longitude"]]
             df_frp["FRP"] = pd.to_numeric(df_frp["FRP"], errors="coerce")
             df_frp = df_frp.dropna(subset=["FRP"])
             df_frp = df_frp.sort_values("FRP", ascending=True).reset_index(drop=True)
 
-            st.dataframe(df_frp, use_container_width=True, hide_index=True)
+            event = st.dataframe(
+                df_frp,
+                on_select="rerun",
+                selection_mode="single-row",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Latitude": None,
+                    "Longitude": None,
+                }
+            )
+
+            if event.selection and event.selection.rows:
+                sel_row = event.selection.rows[0]
+                lat = df_frp.iloc[sel_row]["Latitude"]
+                lon = df_frp.iloc[sel_row]["Longitude"]
+                mun = df_frp.iloc[sel_row]["Município"]
+                frp_val = df_frp.iloc[sel_row]["FRP"]
+                data_val = df_frp.iloc[sel_row]["Data"]
+
+                mapa_frp = folium.Map(location=[lat, lon], zoom_start=12)
+                folium.Marker(
+                    location=[lat, lon],
+                    popup=folium.Popup(
+                        f"<b>{mun}</b><br>Data: {data_val}<br>FRP: {frp_val}",
+                        max_width=250
+                    ),
+                    icon=folium.Icon(color="red", icon="fire", icon_color="white")
+                ).add_to(mapa_frp)
+                st_folium(mapa_frp, width=800, height=400)
+            else:
+                st.caption("Clique em uma linha da tabela para ver o ponto no mapa.")
 
         st.markdown(horizontal_bar, True)
 
