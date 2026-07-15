@@ -1,13 +1,13 @@
 import streamlit as st
 from streamlit_folium import st_folium
-import streamlit_option_menu
 from streamlit_option_menu import option_menu
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import geopandas as gpd
 import plotly.express as px
 import plotly.graph_objects as go
 import folium
-from folium.plugins import HeatMap, Fullscreen
+from folium.plugins import HeatMap, Fullscreen, MarkerCluster
 from datetime import datetime, timedelta
 import urllib.request
 import io
@@ -24,25 +24,34 @@ if "dias" not in st.session_state:
 
 URL_BASE = "https://dataserver-coids.inpe.br/queimadas/queimadas/focos/csv/diario/Brasil"
 
+def _fetch_csv(url):
+    try:
+        with urllib.request.urlopen(url, timeout=30) as f:
+            raw = f.read()
+        if len(raw) < 50:
+            return None
+        return pd.read_csv(io.BytesIO(raw), encoding='utf-8')
+    except Exception:
+        return None
+
 @st.cache_data(ttl=3600)
 def load_data(dias):
     rmc = gpd.read_file("dataset/RMC_Municipios_2024.shp")
 
     hoje = datetime.now()
+    urls = [
+        f"{URL_BASE}/focos_diario_br_{(hoje - timedelta(days=i)).strftime('%Y%m%d')}.csv"
+        for i in range(dias)
+    ]
+
     registros = []
-    for i in range(dias):
-        data = hoje - timedelta(days=i)
-        url = f"{URL_BASE}/focos_diario_br_{data.strftime('%Y%m%d')}.csv"
-        try:
-            with urllib.request.urlopen(url, timeout=30) as f:
-                raw = f.read()
-            if len(raw) < 50:
-                continue
-            df = pd.read_csv(io.BytesIO(raw), encoding='utf-8')
-            df.columns = [c.strip().lower() for c in df.columns]
-            registros.append(df)
-        except Exception:
-            continue
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(_fetch_csv, u): u for u in urls}
+        for fut in as_completed(futures):
+            df = fut.result()
+            if df is not None:
+                df.columns = [c.strip().lower() for c in df.columns]
+                registros.append(df)
 
     if not registros:
         return None, None, None, rmc
@@ -65,14 +74,15 @@ def load_data(dias):
     if gdf.empty:
         return None, None, None, rmc
 
-    df_q = gdf.copy()
-    df_q['Data'] = pd.to_datetime(df_q['data_hora_gmt'], errors='coerce')
-    df_q = df_q.dropna(subset=['Data'])
-    df_q.set_index('Data', inplace=True)
-    df_q['Número de Focos'] = 1
-    df_q['Latitude'] = df_q['lat']
-    df_q['Longitude'] = df_q['lon']
-    df_q['Municipio'] = df_q['NM_MUN']
+    gdf['Data'] = pd.to_datetime(gdf['data_hora_gmt'], errors='coerce')
+    gdf = gdf.dropna(subset=['Data'])
+    gdf.set_index('Data', inplace=True)
+    gdf['Número de Focos'] = 1
+    gdf['Latitude'] = gdf['lat']
+    gdf['Longitude'] = gdf['lon']
+    gdf['Municipio'] = gdf['NM_MUN']
+
+    df_q = gdf
 
     list_municipios = sorted(df_q['Municipio'].unique())
     data_inicio = df_q.index.min().strftime('%d/%m/%Y')
@@ -81,6 +91,22 @@ def load_data(dias):
     return df_q, list_municipios, (data_inicio, data_fim), rmc
 
 df_queimadas, list_municipios, periodo, rmc = load_data(st.session_state.dias)
+
+if df_queimadas is not None:
+    agg_municipio = df_queimadas.groupby("Municipio")["Número de Focos"].sum()
+    agg_diario = df_queimadas.resample("D")["Número de Focos"].sum()
+    if "bioma" in df_queimadas.columns and df_queimadas["bioma"].notna().any():
+        agg_bioma = df_queimadas.groupby("bioma")["Número de Focos"].sum()
+    else:
+        agg_bioma = None
+    if "satelite" in df_queimadas.columns:
+        agg_satelite = df_queimadas.groupby("satelite")["Número de Focos"].sum()
+    else:
+        agg_satelite = None
+else:
+    agg_municipio = agg_diario = agg_bioma = agg_satelite = None
+
+rmc_geojson = rmc.__geo_interface__
 
 st.markdown(
     """
@@ -130,7 +156,6 @@ def plot_mapa(municipios_selecionados=None):
 
     mapa = folium.Map(location=[-22.9, -47.05], zoom_start=10)
 
-    rmc_geojson = rmc.__geo_interface__
     folium.GeoJson(
         rmc_geojson, name="Limites RMC",
         style_function=lambda x: {'color': 'black', 'weight': 2, 'fillOpacity': 0}
@@ -148,7 +173,7 @@ def plot_mapa(municipios_selecionados=None):
             control=True
         ).add_to(mapa)
 
-        marker_group = folium.FeatureGroup(name="Focos de Queimadas")
+        marker_cluster = MarkerCluster(name="Focos de Queimadas")
         for idx, row in df_filtrado.iterrows():
             popup_text = (
                 f"<b>Município:</b> {row['Municipio']}<br>"
@@ -162,8 +187,8 @@ def plot_mapa(municipios_selecionados=None):
                 location=[row['Latitude'], row['Longitude']],
                 popup=folium.Popup(popup_text, max_width=300),
                 icon=folium.Icon(color="red", icon="fire", icon_color="white")
-            ).add_to(marker_group)
-        marker_group.add_to(mapa)
+            ).add_to(marker_cluster)
+        marker_cluster.add_to(mapa)
         folium.LayerControl(position="topright").add_to(mapa)
 
     Fullscreen().add_to(mapa)
@@ -214,30 +239,27 @@ if selected == "Início":
 
         col1, col2, col3, col4 = st.columns(4)
 
-        top_municipio = df_queimadas.groupby("Municipio")["Número de Focos"].sum()
         col1.metric(
             label="Município",
-            value=top_municipio.idxmax(),
-            delta=f"{top_municipio.max()} focos",
+            value=agg_municipio.idxmax(),
+            delta=f"{agg_municipio.max()} focos",
             border=True
         )
 
-        if "bioma" in df_queimadas.columns and df_queimadas["bioma"].notna().any():
-            top_bioma = df_queimadas.groupby("bioma")["Número de Focos"].sum()
+        if agg_bioma is not None:
             col2.metric(
                 label="Bioma",
-                value=top_bioma.idxmax(),
-                delta=f"{top_bioma.max()} focos",
+                value=agg_bioma.idxmax(),
+                delta=f"{agg_bioma.max()} focos",
                 border=True
             )
         else:
             col2.metric("Bioma", "N/D", border=True)
 
-        top_dia = df_queimadas.resample("D")["Número de Focos"].sum()
         col3.metric(
             label="Dia",
-            value=top_dia.idxmax().strftime("%d/%m/%Y"),
-            delta=f"{top_dia.max()} focos",
+            value=agg_diario.idxmax().strftime("%d/%m/%Y"),
+            delta=f"{agg_diario.max()} focos",
             border=True
         )
 
@@ -256,7 +278,7 @@ if selected == range_label:
     if df_queimadas is None:
         st.warning("Nenhum dado disponível para o período.")
     else:
-        df_diario = df_queimadas.resample("D")["Número de Focos"].sum().reset_index()
+        df_diario = agg_diario.reset_index()
         df_diario["Data"] = df_diario["Data"].dt.strftime("%d/%m")
 
         fig_diario = px.bar(
@@ -291,20 +313,16 @@ if selected == range_label:
             st.markdown(horizontal_bar, True)
             st.subheader("Focos por FRP (Crescente)")
 
-            df_frp = df_queimadas[["Municipio", "satelite", "bioma", "frp"]].copy()
-            df_frp["Data"] = df_queimadas.index.strftime("%d/%m/%Y %H:%M")
-            df_frp["Latitude"] = df_queimadas["Latitude"]
-            df_frp["Longitude"] = df_queimadas["Longitude"]
-            df_frp = df_frp.rename(columns={
-                "Municipio": "Município",
-                "satelite": "Satélite",
-                "bioma": "Bioma",
-                "frp": "FRP"
+            df_frp = pd.DataFrame({
+                "Município": df_queimadas["Municipio"].values,
+                "Data": df_queimadas.index.strftime("%d/%m/%Y %H:%M").values,
+                "Satélite": df_queimadas["satelite"].values,
+                "Bioma": df_queimadas["bioma"].values,
+                "FRP": pd.to_numeric(df_queimadas["frp"], errors="coerce").values,
+                "Latitude": df_queimadas["Latitude"].values,
+                "Longitude": df_queimadas["Longitude"].values,
             })
-            df_frp = df_frp[["Município", "Data", "Satélite", "Bioma", "FRP", "Latitude", "Longitude"]]
-            df_frp["FRP"] = pd.to_numeric(df_frp["FRP"], errors="coerce")
-            df_frp = df_frp.dropna(subset=["FRP"])
-            df_frp = df_frp.sort_values("FRP", ascending=True).reset_index(drop=True)
+            df_frp = df_frp.dropna(subset=["FRP"]).sort_values("FRP", ascending=True).reset_index(drop=True)
 
             event = st.dataframe(
                 df_frp,
@@ -362,8 +380,7 @@ if selected == "Municípios e Satélites":
             titulo_periodo = ""
 
         df_top_mun = (
-            df_queimadas.groupby("Municipio")["Número de Focos"].sum()
-            .reset_index()
+            agg_municipio.reset_index()
             .sort_values("Número de Focos", ascending=True)
             .tail(num_municipios)
         )
@@ -382,10 +399,9 @@ if selected == "Municípios e Satélites":
         )
         st.plotly_chart(fig_mun, width='stretch')
 
-        if "satelite" in df_queimadas.columns:
+        if agg_satelite is not None:
             df_sat = (
-                df_queimadas.groupby("satelite")["Número de Focos"].sum()
-                .reset_index()
+                agg_satelite.reset_index()
                 .sort_values("Número de Focos", ascending=True)
             )
             fig_sat = px.bar(
@@ -400,10 +416,9 @@ if selected == "Municípios e Satélites":
             fig_sat.update_layout(hoverlabel=dict(font_size=12, font_color="white"))
             st.plotly_chart(fig_sat, width='stretch')
 
-        if "bioma" in df_queimadas.columns:
+        if agg_bioma is not None:
             df_bio = (
-                df_queimadas.groupby("bioma")["Número de Focos"].sum()
-                .reset_index()
+                agg_bioma.reset_index()
                 .sort_values("Número de Focos", ascending=True)
             )
             fig_bio = px.bar(
