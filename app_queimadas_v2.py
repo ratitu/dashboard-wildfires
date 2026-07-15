@@ -287,6 +287,25 @@ if selected == range_label:
         }).rename(columns={"satelite": "Satélites"}).reset_index().sort_values("Número de Focos", ascending=False)
         st.dataframe(df_resumo, use_container_width=True, hide_index=True)
 
+        if "frp" in df_queimadas.columns:
+            st.markdown(horizontal_bar, True)
+            st.subheader("Focos por FRP (Crescente)")
+
+            df_frp = df_queimadas[["Municipio", "satelite", "bioma", "frp"]].copy()
+            df_frp["Data"] = df_queimadas.index.strftime("%d/%m/%Y %H:%M")
+            df_frp = df_frp.rename(columns={
+                "Municipio": "Município",
+                "satelite": "Satélite",
+                "bioma": "Bioma",
+                "frp": "FRP"
+            })
+            df_frp = df_frp[["Município", "Data", "Satélite", "Bioma", "FRP"]]
+            df_frp["FRP"] = pd.to_numeric(df_frp["FRP"], errors="coerce")
+            df_frp = df_frp.dropna(subset=["FRP"])
+            df_frp = df_frp.sort_values("FRP", ascending=True).reset_index(drop=True)
+
+            st.dataframe(df_frp, use_container_width=True, hide_index=True)
+
         st.markdown(horizontal_bar, True)
 
 if selected == "Municípios e Satélites":
