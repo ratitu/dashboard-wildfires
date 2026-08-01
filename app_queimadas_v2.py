@@ -95,7 +95,7 @@ df_queimadas, list_municipios, periodo, rmc = load_data(st.session_state.dias)
 if df_queimadas is not None:
     agg_municipio = df_queimadas.groupby("Municipio")["Número de Focos"].sum()
     agg_diario = df_queimadas.resample("D")["Número de Focos"].sum()
-    if "bioma" in df_queimadas.columns and df_queimadas["bioma"].notna().any():
+    if "bioma" in df_queimadas.columns:
         agg_bioma = df_queimadas.groupby("bioma")["Número de Focos"].sum()
     else:
         agg_bioma = None
@@ -105,6 +105,8 @@ if df_queimadas is not None:
         agg_satelite = None
 else:
     agg_municipio = agg_diario = agg_bioma = agg_satelite = None
+
+bioma_tem_dados = agg_bioma is not None and not agg_bioma.empty
 
 rmc_geojson = rmc.__geo_interface__
 
@@ -146,7 +148,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-def plot_mapa(municipios_selecionados=None):
+def plot_mapa(municipios_selecionados=None, destaque=None):
     if df_queimadas is not None:
         df_filtrado = df_queimadas
         if municipios_selecionados:
@@ -154,7 +156,10 @@ def plot_mapa(municipios_selecionados=None):
     else:
         df_filtrado = None
 
-    mapa = folium.Map(location=[-22.9, -47.05], zoom_start=10)
+    if destaque:
+        mapa = folium.Map(location=[destaque[0], destaque[1]], zoom_start=13)
+    else:
+        mapa = folium.Map(location=[-22.9, -47.05], zoom_start=10)
 
     folium.GeoJson(
         rmc_geojson, name="Limites RMC",
@@ -190,6 +195,13 @@ def plot_mapa(municipios_selecionados=None):
             ).add_to(marker_cluster)
         marker_cluster.add_to(mapa)
         folium.LayerControl(position="topright").add_to(mapa)
+
+    if destaque:
+        folium.Marker(
+            location=[destaque[0], destaque[1]],
+            popup=folium.Popup("Foco selecionado na tabela", max_width=200),
+            icon=folium.Icon(color="blue", icon="star", icon_color="white")
+        ).add_to(mapa)
 
     Fullscreen().add_to(mapa)
     return mapa
@@ -246,7 +258,7 @@ if selected == "Início":
             border=True
         )
 
-        if agg_bioma is not None:
+        if bioma_tem_dados:
             col2.metric(
                 label="Bioma",
                 value=agg_bioma.idxmax(),
@@ -460,6 +472,65 @@ if selected == "Mapa":
     if periodo:
         st.markdown(f"**Período:** {periodo[0]} a {periodo[1]}")
 
-    mapa = plot_mapa(municipios_sel if municipios_sel else None)
+    destaque = None
+    df_pontos = None
+    if df_queimadas is not None:
+        df_filtrado = df_queimadas
+        if municipios_sel:
+            df_filtrado = df_queimadas[df_queimadas['Municipio'].isin(municipios_sel)]
+
+        if st.session_state.get("filtro_mapa_anterior") != municipios_sel:
+            st.session_state.pop("tabela_focos_mapa", None)
+        st.session_state["filtro_mapa_anterior"] = municipios_sel
+
+        if not df_filtrado.empty:
+            df_pontos = pd.DataFrame({
+                "Data": df_filtrado.index.strftime("%d/%m/%Y %H:%M").values,
+                "Município": df_filtrado["Municipio"].values,
+            })
+            for nome, col in [("Satélite", "satelite"), ("Bioma", "bioma"),
+                              ("Risco de Fogo", "risco_fogo"), ("FRP", "frp")]:
+                if col in df_filtrado.columns:
+                    df_pontos[nome] = df_filtrado[col].values
+            df_pontos["Latitude"] = df_filtrado["Latitude"].values
+            df_pontos["Longitude"] = df_filtrado["Longitude"].values
+
+            estado = st.session_state.get("tabela_focos_mapa")
+            if estado:
+                linhas = estado.get("selection", {}).get("rows", [])
+                if linhas and linhas[0] < len(df_pontos):
+                    linha = linhas[0]
+                    destaque = (df_pontos.iloc[linha]["Latitude"], df_pontos.iloc[linha]["Longitude"])
+
+    mapa = plot_mapa(municipios_sel if municipios_sel else None, destaque=destaque)
     st_folium(mapa, width=800, height=500)
+
+    if df_pontos is not None:
+        st.subheader("Focos Detectados")
+
+        event = st.dataframe(
+            df_pontos,
+            key="tabela_focos_mapa",
+            on_select="rerun",
+            selection_mode="single-row",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Latitude": None,
+                "Longitude": None,
+                "FRP": st.column_config.NumberColumn("FRP", format="%.1f"),
+            },
+        )
+
+        if event.selection and event.selection.rows:
+            sel = df_pontos.iloc[event.selection.rows[0]]
+            st.caption(
+                f"Foco selecionado: **{sel['Município']}** — {sel['Data']} "
+                f"({sel['Latitude']:.4f}, {sel['Longitude']:.4f})"
+            )
+        else:
+            st.caption("Clique em uma linha da tabela para destacar o foco no mapa.")
+    else:
+        st.warning("Nenhum foco detectado para a região selecionada.")
+
     st.markdown(horizontal_bar, True)
