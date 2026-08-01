@@ -1,16 +1,26 @@
+import folium
+import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 from streamlit_option_menu import option_menu
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import pandas as pd
-import geopandas as gpd
-import plotly.express as px
-import plotly.graph_objects as go
-import folium
-from folium.plugins import HeatMap, Fullscreen, MarkerCluster
-from datetime import datetime, timedelta
-import urllib.request
-import io
+
+from data import (
+    calcular_agregacoes,
+    comparar_municipios,
+    df_para_tabela,
+    df_resumo_municipios,
+    load_data,
+)
+from graficos import (
+    fig_biomas,
+    fig_comparacao,
+    fig_diario,
+    fig_horario,
+    fig_risco,
+    fig_satelites,
+    fig_top_municipios,
+)
+from mapa import plot_mapa
 
 st.set_page_config(
     page_title="Monitoramento de Queimadas na Região Metropolitana de Campinas",
@@ -22,90 +32,9 @@ st.set_page_config(
 if "dias" not in st.session_state:
     st.session_state.dias = 15
 
-URL_BASE = "https://dataserver-coids.inpe.br/queimadas/queimadas/focos/csv/diario/Brasil"
+df_queimadas, df_anterior, list_municipios, periodo, rmc = load_data(st.session_state.dias)
 
-def _fetch_csv(url):
-    try:
-        with urllib.request.urlopen(url, timeout=30) as f:
-            raw = f.read()
-        if len(raw) < 50:
-            return None
-        return pd.read_csv(io.BytesIO(raw), encoding='utf-8')
-    except Exception:
-        return None
-
-@st.cache_data(ttl=3600)
-def load_data(dias):
-    rmc = gpd.read_file("dataset/RMC_Municipios_2024.shp")
-
-    hoje = datetime.now()
-    urls = [
-        f"{URL_BASE}/focos_diario_br_{(hoje - timedelta(days=i)).strftime('%Y%m%d')}.csv"
-        for i in range(dias)
-    ]
-
-    registros = []
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        futures = {pool.submit(_fetch_csv, u): u for u in urls}
-        for fut in as_completed(futures):
-            df = fut.result()
-            if df is not None:
-                df.columns = [c.strip().lower() for c in df.columns]
-                registros.append(df)
-
-    if not registros:
-        return None, None, None, rmc
-
-    df = pd.concat(registros, ignore_index=True)
-
-    for col in ['lat', 'lon']:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-    df = df.dropna(subset=['lat', 'lon'])
-
-    gdf = gpd.GeoDataFrame(
-        df,
-        geometry=gpd.points_from_xy(df['lon'], df['lat']),
-        crs="EPSG:4326"
-    )
-    gdf = gdf.to_crs(rmc.crs)
-    gdf = gdf.sjoin(rmc, how='inner', predicate='within')
-
-    if gdf.empty:
-        return None, None, None, rmc
-
-    gdf['Data'] = pd.to_datetime(gdf['data_hora_gmt'], errors='coerce')
-    gdf = gdf.dropna(subset=['Data'])
-    gdf.set_index('Data', inplace=True)
-    gdf['Número de Focos'] = 1
-    gdf['Latitude'] = gdf['lat']
-    gdf['Longitude'] = gdf['lon']
-    gdf['Municipio'] = gdf['NM_MUN']
-
-    df_q = gdf
-
-    list_municipios = sorted(df_q['Municipio'].unique())
-    data_inicio = df_q.index.min().strftime('%d/%m/%Y')
-    data_fim = df_q.index.max().strftime('%d/%m/%Y')
-
-    return df_q, list_municipios, (data_inicio, data_fim), rmc
-
-df_queimadas, list_municipios, periodo, rmc = load_data(st.session_state.dias)
-
-if df_queimadas is not None:
-    agg_municipio = df_queimadas.groupby("Municipio")["Número de Focos"].sum()
-    agg_diario = df_queimadas.resample("D")["Número de Focos"].sum()
-    if "bioma" in df_queimadas.columns:
-        agg_bioma = df_queimadas.groupby("bioma")["Número de Focos"].sum()
-    else:
-        agg_bioma = None
-    if "satelite" in df_queimadas.columns:
-        agg_satelite = df_queimadas.groupby("satelite")["Número de Focos"].sum()
-    else:
-        agg_satelite = None
-else:
-    agg_municipio = agg_diario = agg_bioma = agg_satelite = None
-
+agg_municipio, agg_diario, agg_bioma, agg_satelite = calcular_agregacoes(df_queimadas)
 bioma_tem_dados = agg_bioma is not None and not agg_bioma.empty
 
 rmc_geojson = rmc.__geo_interface__
@@ -148,76 +77,28 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-def plot_mapa(municipios_selecionados=None, destaque=None):
-    if df_queimadas is not None:
-        df_filtrado = df_queimadas
-        if municipios_selecionados:
-            df_filtrado = df_queimadas[df_queimadas['Municipio'].isin(municipios_selecionados)]
-    else:
-        df_filtrado = None
-
-    if destaque:
-        mapa = folium.Map(location=[destaque[0], destaque[1]], zoom_start=13)
-    else:
-        mapa = folium.Map(location=[-22.9, -47.05], zoom_start=10)
-
-    folium.GeoJson(
-        rmc_geojson, name="Limites RMC",
-        style_function=lambda x: {'color': 'black', 'weight': 2, 'fillOpacity': 0}
-    ).add_to(mapa)
-
-    if df_filtrado is not None and not df_filtrado.empty:
-        heat_data = df_filtrado[['Latitude', 'Longitude']].values.tolist()
-        HeatMap(heat_data, radius=10, name="Mapa de Calor", blur=10).add_to(mapa)
-
-        folium.TileLayer(
-            tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            attr='Esri',
-            name='Esri Satellite',
-            overlay=False,
-            control=True
-        ).add_to(mapa)
-
-        marker_cluster = MarkerCluster(name="Focos de Queimadas")
-        for idx, row in df_filtrado.iterrows():
-            popup_text = (
-                f"<b>Município:</b> {row['Municipio']}<br>"
-                f"<b>Data:</b> {idx.strftime('%d/%m/%Y %H:%M')}<br>"
-                f"<b>Satélite:</b> {row.get('satelite', 'N/D')}<br>"
-                f"<b>Bioma:</b> {row.get('bioma', 'N/D')}<br>"
-                f"<b>Risco de Fogo:</b> {row.get('risco_fogo', 'N/D')}<br>"
-                f"<b>FRP:</b> {row.get('frp', 'N/D')}"
-            )
-            folium.Marker(
-                location=[row['Latitude'], row['Longitude']],
-                popup=folium.Popup(popup_text, max_width=300),
-                icon=folium.Icon(color="red", icon="fire", icon_color="white")
-            ).add_to(marker_cluster)
-        marker_cluster.add_to(mapa)
-        folium.LayerControl(position="topright").add_to(mapa)
-
-    if destaque:
-        folium.Marker(
-            location=[destaque[0], destaque[1]],
-            popup=folium.Popup("Foco selecionado na tabela", max_width=200),
-            icon=folium.Icon(color="blue", icon="star", icon_color="white")
-        ).add_to(mapa)
-
-    Fullscreen().add_to(mapa)
-    return mapa
-
 horizontal_bar = "<hr style='margin-top: 0; margin-bottom: 0; height: 1px; border: 1px solid #FF9100DA;'><br>"
 
 range_label = f"Últimos {st.session_state.dias} dias"
 
+OPCOES = ["Início", range_label, "Análises", "Municípios e Satélites", "Município", "Mapa"]
+ICONES = ["house", "bar-chart", "graph-up", "geo-alt", "search", "map"]
+
+
+def _ir_para_mapa(municipio):
+    st.session_state["municipio_map_selector"] = [municipio]
+    st.session_state["pagina_alvo"] = OPCOES.index("Mapa")
+
 with st.sidebar:
     st.selectbox("Período:", [15, 30], index=0, key="dias")
+    pagina_alvo = st.session_state.pop("pagina_alvo", None)
     selected = option_menu(
         menu_title="Navegação",
-        options=["Início", range_label, "Municípios e Satélites", "Mapa"],
-        icons=["house", "bar-chart", "geo-alt", "map"],
+        options=OPCOES,
+        icons=ICONES,
         menu_icon="cast",
         default_index=0,
+        manual_select=pagina_alvo,
     )
 
 if selected == "Início":
@@ -233,8 +114,10 @@ if selected == "Início":
         </p>
         <ul style="font-size:15px;">
         <li><b>{range_label}</b>: evolução diária dos focos de queimadas.</li>
+        <li><b>Análises</b>: distribuição horária, risco de fogo e comparação com o período anterior.</li>
         <li><b>Municípios e Satélites</b>: distribuição por município e satélite de origem.</li>
-        <li><b>Mapa</b>: mapa interativo com mapa de calor e marcadores dos focos.</li>
+        <li><b>Município</b>: detalhamento de um município específico.</li>
+        <li><b>Mapa</b>: mapa interativo com mapa de calor, marcadores e animação temporal.</li>
         </ul>
         """,
         unsafe_allow_html=True
@@ -290,36 +173,10 @@ if selected == range_label:
     if df_queimadas is None:
         st.warning("Nenhum dado disponível para o período.")
     else:
-        df_diario = agg_diario.reset_index()
-        df_diario["Data"] = df_diario["Data"].dt.strftime("%d/%m")
+        st.plotly_chart(fig_diario(agg_diario), width='stretch')
 
-        fig_diario = px.bar(
-            df_diario,
-            x="Data",
-            y="Número de Focos",
-            title="Focos de Queimadas por Dia",
-            color_discrete_sequence=["red"]
-        )
-        fig_diario.add_trace(go.Scatter(
-            x=df_diario["Data"],
-            y=df_diario["Número de Focos"].rolling(3, min_periods=1).mean(),
-            mode="lines+markers",
-            name="Média móvel (3 dias)",
-            line=dict(color="yellow", width=2)
-        ))
-        fig_diario.update_layout(
-            xaxis_title="Data",
-            yaxis_title="Número de Focos",
-            hoverlabel=dict(font_size=12, font_color="white"),
-            hovermode="x unified"
-        )
-        st.plotly_chart(fig_diario, width='stretch')
-
-        df_resumo = df_queimadas.groupby("Municipio").agg({
-            "Número de Focos": "sum",
-            "satelite": lambda x: x.nunique() if x.notna().any() else 0,
-        }).rename(columns={"satelite": "Satélites"}).reset_index().sort_values("Número de Focos", ascending=False)
-        st.dataframe(df_resumo, use_container_width=True, hide_index=True)
+        st.markdown("**Resumo por município**")
+        st.dataframe(df_resumo_municipios(df_queimadas), use_container_width=True, hide_index=True)
 
         if "frp" in df_queimadas.columns:
             st.markdown(horizontal_bar, True)
@@ -371,6 +228,78 @@ if selected == range_label:
 
         st.markdown(horizontal_bar, True)
 
+if selected == "Análises":
+    st.subheader("Análises dos Focos de Queimadas")
+
+    if df_queimadas is None:
+        st.warning("Nenhum dado disponível para o período.")
+    else:
+        st.markdown("#### Distribuição por hora do dia")
+        st.plotly_chart(fig_horario(df_queimadas), width='stretch')
+        st.caption("Horários em GMT (UTC); os satélites polares sobrevoam a região no início da tarde.")
+        st.markdown(horizontal_bar, True)
+
+        fig_risco_atual = fig_risco(df_queimadas)
+        if fig_risco_atual is not None:
+            st.markdown("#### Risco de Fogo")
+            st.plotly_chart(fig_risco_atual, width='stretch')
+            st.markdown(horizontal_bar, True)
+
+        st.markdown("#### Comparação com o período anterior")
+        if df_anterior is not None and not df_anterior.empty:
+            total_atual = int(df_queimadas["Número de Focos"].sum())
+            total_anterior = int(df_anterior["Número de Focos"].sum())
+            variacao = total_atual - total_anterior
+            variacao_pct = (variacao / total_anterior * 100) if total_anterior else None
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Período atual", f"{total_atual} focos", border=True)
+            c2.metric("Período anterior", f"{total_anterior} focos", border=True)
+            c3.metric(
+                "Variação",
+                f"{variacao:+,d} focos",
+                delta=f"{variacao_pct:+.0f}%" if variacao_pct is not None else "—",
+                delta_color="inverse",
+                border=True
+            )
+            st.caption(
+                f"Atual: {periodo[0]} a {periodo[1]} | "
+                f"Anterior: {df_anterior.index.min().strftime('%d/%m/%Y')} a "
+                f"{df_anterior.index.max().strftime('%d/%m/%Y')}"
+            )
+
+            serie_atual = df_queimadas.resample("D")["Número de Focos"].sum()
+            serie_anterior = df_anterior.resample("D")["Número de Focos"].sum()
+            st.plotly_chart(
+                fig_comparacao(serie_atual, serie_anterior, "Período atual", "Período anterior"),
+                width='stretch'
+            )
+
+            comp = comparar_municipios(df_queimadas, df_anterior)
+            col_a, col_b = st.columns(2)
+            with col_a:
+                st.markdown("**Maiores altas por município**")
+                st.dataframe(
+                    comp.head(5)[["Anterior", "Atual", "Variação"]],
+                    use_container_width=True,
+                    hide_index=True
+                )
+            with col_b:
+                st.markdown("**Maiores quedas por município**")
+                st.dataframe(
+                    comp.tail(5).iloc[::-1][["Anterior", "Atual", "Variação"]],
+                    use_container_width=True,
+                    hide_index=True
+                )
+        else:
+            st.warning(
+                "Não há dados do período anterior disponíveis. "
+                "O servidor do INPE mantém os arquivos diários por aproximadamente 30 dias; "
+                "a comparação é mais confiável com períodos de 15 dias."
+            )
+
+        st.markdown(horizontal_bar, True)
+
 if selected == "Municípios e Satélites":
     st.subheader("Distribuição dos Focos por Município e Satélite")
 
@@ -391,59 +320,102 @@ if selected == "Municípios e Satélites":
         else:
             titulo_periodo = ""
 
-        df_top_mun = (
-            agg_municipio.reset_index()
-            .sort_values("Número de Focos", ascending=True)
-            .tail(num_municipios)
+        st.plotly_chart(
+            fig_top_municipios(agg_municipio, num_municipios, titulo_periodo),
+            width='stretch'
         )
-        fig_mun = px.bar(
-            df_top_mun,
-            x="Número de Focos",
-            y="Municipio",
-            orientation="h",
-            title=f"Top {num_municipios} Municípios {titulo_periodo}",
-            color_discrete_sequence=["red"],
-            height=600
-        )
-        fig_mun.update_layout(
-            yaxis={"categoryorder": "total ascending"},
-            hoverlabel=dict(font_size=12, font_color="white")
-        )
-        st.plotly_chart(fig_mun, width='stretch')
 
         if agg_satelite is not None:
-            df_sat = (
-                agg_satelite.reset_index()
-                .sort_values("Número de Focos", ascending=True)
-            )
-            fig_sat = px.bar(
-                df_sat,
-                x="Número de Focos",
-                y="satelite",
-                orientation="h",
-                title="Focos Detectados por Satélite",
-                color_discrete_sequence=["orange"],
-                height=400
-            )
-            fig_sat.update_layout(hoverlabel=dict(font_size=12, font_color="white"))
-            st.plotly_chart(fig_sat, width='stretch')
+            st.plotly_chart(fig_satelites(agg_satelite), width='stretch')
 
         if agg_bioma is not None:
-            df_bio = (
-                agg_bioma.reset_index()
-                .sort_values("Número de Focos", ascending=True)
-            )
-            fig_bio = px.bar(
-                df_bio,
-                x="Número de Focos",
-                y="bioma",
-                orientation="h",
-                title="Focos por Bioma",
-                color_discrete_sequence=["darkred"],
-                height=300
-            )
-            fig_bio.update_layout(hoverlabel=dict(font_size=12, font_color="white"))
-            st.plotly_chart(fig_bio, width='stretch')
+            st.plotly_chart(fig_biomas(agg_bioma), width='stretch')
+
+        st.markdown(horizontal_bar, True)
+
+if selected == "Município":
+    st.subheader("Detalhamento por Município")
+
+    if df_queimadas is None or not list_municipios:
+        st.warning("Nenhum dado disponível para o período.")
+    else:
+        col_sel, _, _ = st.columns([1.2, 2, 1])
+        with col_sel:
+            municipio = st.selectbox("Município:", list_municipios, key="municipio_detalhe_selector")
+
+        df_mun = df_queimadas[df_queimadas["Municipio"] == municipio]
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total de focos", f"{int(df_mun['Número de Focos'].sum())}", border=True)
+        c2.metric("Dias com focos", f"{df_mun.resample('D')['Número de Focos'].sum().size}", border=True)
+        c3.metric(
+            "Satélites",
+            f"{df_mun['satelite'].nunique()}" if "satelite" in df_mun.columns else "N/D",
+            border=True
+        )
+        c4.metric(
+            "Biomas",
+            f"{df_mun['bioma'].nunique()}" if "bioma" in df_mun.columns else "N/D",
+            border=True
+        )
+
+        agg_diario_mun = df_mun.resample("D")["Número de Focos"].sum()
+        st.plotly_chart(fig_diario(agg_diario_mun, titulo=f"Focos por Dia em {municipio}"), width='stretch')
+
+        col_sat, col_bio = st.columns(2)
+        with col_sat:
+            if "satelite" in df_mun.columns:
+                agg_sat_mun = df_mun.groupby("satelite")["Número de Focos"].sum()
+                st.plotly_chart(fig_satelites(agg_sat_mun, titulo="Por Satélite", altura=350), width='stretch')
+        with col_bio:
+            if "bioma" in df_mun.columns:
+                agg_bio_mun = df_mun.groupby("bioma")["Número de Focos"].sum()
+                st.plotly_chart(fig_biomas(agg_bio_mun, titulo="Por Bioma", altura=350), width='stretch')
+
+        fig_risco_mun = fig_risco(df_mun)
+        if fig_risco_mun is not None:
+            st.plotly_chart(fig_risco_mun, width='stretch')
+
+        df_pontos_mun = df_para_tabela(df_mun)
+        st.markdown(f"**Focos detectados em {municipio}**")
+        event_mun = st.dataframe(
+            df_pontos_mun,
+            on_select="rerun",
+            selection_mode="single-row",
+            use_container_width=True,
+            hide_index=True,
+            key="tabela_focos_municipio",
+            column_config={
+                "Latitude": None,
+                "Longitude": None,
+                "FRP": st.column_config.NumberColumn("FRP", format="%.1f"),
+            },
+        )
+
+        if event_mun.selection and event_mun.selection.rows:
+            sel_mun = df_pontos_mun.iloc[event_mun.selection.rows[0]]
+            lat = sel_mun["Latitude"]
+            lon = sel_mun["Longitude"]
+            mapa_mun = folium.Map(location=[lat, lon], zoom_start=12)
+            folium.Marker(
+                location=[lat, lon],
+                popup=folium.Popup(
+                    f"<b>{sel_mun['Município']}</b><br>Data: {sel_mun['Data']}",
+                    max_width=250
+                ),
+                icon=folium.Icon(color="red", icon="fire", icon_color="white")
+            ).add_to(mapa_mun)
+            st_folium(mapa_mun, width=800, height=400)
+        else:
+            st.caption("Clique em uma linha da tabela para ver o ponto no mapa.")
+
+        if st.button(
+            "Ver no mapa",
+            on_click=_ir_para_mapa,
+            args=(municipio,),
+            use_container_width=True
+        ):
+            pass
 
         st.markdown(horizontal_bar, True)
 
@@ -468,12 +440,14 @@ if selected == "Mapa":
                 key="municipio_map_selector_empty",
                 disabled=True
             )
+        usar_temporal = st.checkbox("Animação temporal (dia a dia)", key="animacao_temporal")
 
     if periodo:
         st.markdown(f"**Período:** {periodo[0]} a {periodo[1]}")
 
     destaque = None
     df_pontos = None
+    df_filtrado = None
     if df_queimadas is not None:
         df_filtrado = df_queimadas
         if municipios_sel:
@@ -484,16 +458,7 @@ if selected == "Mapa":
         st.session_state["filtro_mapa_anterior"] = municipios_sel
 
         if not df_filtrado.empty:
-            df_pontos = pd.DataFrame({
-                "Data": df_filtrado.index.strftime("%d/%m/%Y %H:%M").values,
-                "Município": df_filtrado["Municipio"].values,
-            })
-            for nome, col in [("Satélite", "satelite"), ("Bioma", "bioma"),
-                              ("Risco de Fogo", "risco_fogo"), ("FRP", "frp")]:
-                if col in df_filtrado.columns:
-                    df_pontos[nome] = df_filtrado[col].values
-            df_pontos["Latitude"] = df_filtrado["Latitude"].values
-            df_pontos["Longitude"] = df_filtrado["Longitude"].values
+            df_pontos = df_para_tabela(df_filtrado)
 
             estado = st.session_state.get("tabela_focos_mapa")
             if estado:
@@ -502,7 +467,7 @@ if selected == "Mapa":
                     linha = linhas[0]
                     destaque = (df_pontos.iloc[linha]["Latitude"], df_pontos.iloc[linha]["Longitude"])
 
-    mapa = plot_mapa(municipios_sel if municipios_sel else None, destaque=destaque)
+    mapa = plot_mapa(df_filtrado, rmc_geojson, destaque=destaque, animacao=usar_temporal)
     st_folium(mapa, width=800, height=500)
 
     if df_pontos is not None:
