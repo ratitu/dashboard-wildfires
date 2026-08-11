@@ -1,3 +1,5 @@
+import base64
+
 import folium
 import pandas as pd
 import streamlit as st
@@ -90,6 +92,13 @@ def _ir_para_mapa(municipio):
     st.session_state["pagina_alvo"] = OPCOES.index("Mapa")
 
 with st.sidebar:
+    _logo_b64 = base64.b64encode(open("logo-no-background.png", "rb").read()).decode()
+    st.markdown(
+        f'<a href="https://www.instagram.com/passeionamata/" target="_blank">'
+        f'<img src="data:image/png;base64,{_logo_b64}" style="width:100%;">'
+        f'</a>',
+        unsafe_allow_html=True,
+    )
     st.selectbox("Período:", [15, 30], index=0, key="dias")
     pagina_alvo = st.session_state.pop("pagina_alvo", None)
     selected = option_menu(
@@ -106,19 +115,42 @@ if selected == "Início":
 
     st.markdown(
         f"""
-        <p style="font-size:15px;">
-        Este aplicativo apresenta dados em tempo quase real dos focos de queimadas na
-        <b>Região Metropolitana de Campinas (RMC)</b>.
-        Os dados são obtidos automaticamente do <b>INPE</b> (Instituto Nacional de Pesquisas Espaciais)
-        e abrangem os <b>últimos {st.session_state.dias} dias</b>.
+        <div style="font-size:15px;">
+
+        <p>
+        Este aplicativo apresenta um <b>painel de monitoramento em tempo quase real</b> dos focos de
+        queimadas detectados na <b>Região Metropolitana de Campinas (RMC)</b>.
+        Ele consome automaticamente os dados do <b>INPE</b> (Instituto Nacional de Pesquisas Espaciais) —
+        via satélites de referência do Programa Queimadas — abrangendo os <b>últimos {st.session_state.dias} dias</b>.
         </p>
-        <ul style="font-size:15px;">
-        <li><b>{range_label}</b>: evolução diária dos focos de queimadas.</li>
+
+        <p>
+        Cada foco registra data, hora, município, bioma, satélite de origem e o índice <b>FRP</b>
+        (Fire Radiative Power), que estima a intensidade da queima. Com essas informações o painel permite:
+        </p>
+
+        <ul>
+        <li><b>{range_label}</b>: evolução diária dos focos, resumo por município e tabela de focos por FRP.</li>
         <li><b>Análises</b>: distribuição horária, risco de fogo e comparação com o período anterior.</li>
-        <li><b>Municípios e Satélites</b>: distribuição por município e satélite de origem.</li>
-        <li><b>Município</b>: detalhamento de um município específico.</li>
-        <li><b>Mapa</b>: mapa interativo com mapa de calor, marcadores e animação temporal.</li>
+        <li><b>Municípios e Satélites</b>: distribuição dos focos por município, satélite de origem e bioma.</li>
+        <li><b>Município</b>: detalhamento de um município específico, com gráficos e tabela de focos.</li>
+        <li><b>Mapa</b>: mapa interativo com mapa de calor, marcadores e animação temporal dia a dia.</li>
         </ul>
+
+        <p>
+        Os dados são filtrados espacialmente para o limite da RMC (IBGE 2024) e atualizados a cada passagem
+        dos satélites, com cache de 1 hora.
+        </p>
+
+        <hr>
+        <p style="font-size:13px; color:#999;">
+        © <b>@passeionamata</b> · Este aplicativo está licenciado sob a
+        <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a>.
+        O código-fonte está disponível em
+        <a href="https://github.com/ratitu/dashboard-wildfires" target="_blank">github.com/ratitu/dashboard-wildfires</a>.
+        </p>
+
+        </div>
         """,
         unsafe_allow_html=True
     )
@@ -497,5 +529,14 @@ if selected == "Mapa":
             st.caption("Clique em uma linha da tabela para destacar o foco no mapa.")
     else:
         st.warning("Nenhum foco detectado para a região selecionada.")
-
     st.markdown(horizontal_bar, True)
+
+st.markdown("---")
+st.markdown(
+    '<p style="text-align:center; font-size:13px; color:#999;">'
+    '© @passeionamata · Licenciado sob <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> · '
+    'Código-fonte disponível em <a href="https://github.com/ratitu/dashboard-wildfires" target="_blank">GitHub</a>'
+    '</p>',
+    unsafe_allow_html=True
+)
+
