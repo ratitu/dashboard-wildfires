@@ -1,5 +1,95 @@
 import folium
 from folium.plugins import Fullscreen, HeatMap, MarkerCluster, TimestampedGeoJson
+from folium.template import Template
+
+LEAFLET_JS_171 = "https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.js"
+LEAFLET_CSS_171 = "https://cdn.jsdelivr.net/npm/leaflet@1.7.1/dist/leaflet.css"
+
+GUARD_JS = """(function () {
+    var realUpdate = function () {
+        if (this._map && this._map._animatingZoom) { return; }
+        L.GridLayer.prototype._update.call(this);
+        if (this._map) { this.fire("update"); }
+    };
+    var wrapped = function () {
+        if (this._tdGuard) { return; }
+        this._tdGuard = true;
+        try {
+            if (this._visible || !this._loaded) { this._originalUpdate.call(this); }
+        } finally { this._tdGuard = false; }
+    };
+    L.TileLayer.include({ _originalUpdate: realUpdate, _update: wrapped });
+})();"""
+
+
+class _MapTemporal(folium.Map):
+    """folium.Map com guarda anti-recursão para a animação temporal.
+
+    O streamlit-folium dispara onRender duas vezes em rajada; as cargas
+    concorrentes de leaflet-timedimension envolvem L.TileLayer.prototype._update
+    duas vezes, e o shim acaba chamando a si mesmo (RangeError). Este template
+    reinstala _update/_originalUpdate com guarda de reentrada antes de criar o
+    mapa. Mantido em sincronia com o template de folium.Map (folium 0.19.4).
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.guard_js = GUARD_JS
+
+    _template = Template(
+        """
+        {% macro header(this, kwargs) %}
+            <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+            <style>
+                #{{ this.get_name() }} {
+                    position: {{this.position}};
+                    width: {{this.width[0]}}{{this.width[1]}};
+                    height: {{this.height[0]}}{{this.height[1]}};
+                    left: {{this.left[0]}}{{this.left[1]}};
+                    top: {{this.top[0]}}{{this.top[1]}};
+                }
+                .leaflet-container { font-size: {{this.font_size}}; }
+            </style>
+        {% endmacro %}
+
+        {% macro html(this, kwargs) %}
+            <div class="folium-map" id={{ this.get_name()|tojson }} ></div>
+        {% endmacro %}
+
+        {% macro script(this, kwargs) %}
+            {{ this.guard_js }}
+            var {{ this.get_name() }} = L.map(
+                {{ this.get_name()|tojson }},
+                {
+                    center: {{ this.location|tojson }},
+                    crs: L.CRS.{{ this.crs }},
+                    ...{{this.options|tojavascript}}
+
+                }
+            );
+
+            {%- if this.control_scale %}
+            L.control.scale().addTo({{ this.get_name() }});
+            {%- endif %}
+
+            {%- if this.zoom_control_position %}
+            L.control.zoom( { position: {{ this.zoom_control|tojson }} } ).addTo({{ this.get_name() }});
+            {%- endif %}
+
+            {% if this.objects_to_stay_in_front %}
+            function objects_in_front() {
+                {%- for obj in this.objects_to_stay_in_front %}
+                    {{ obj.get_name() }}.bringToFront();
+                {%- endfor %}
+            };
+            {{ this.get_name() }}.on("overlayadd", objects_in_front);
+            $(document).ready(objects_in_front);
+            {%- endif %}
+
+        {% endmacro %}
+        """
+    )
 
 
 def _popup_html(idx, row):
@@ -34,22 +124,52 @@ def layer_temporal(df):
                 },
             },
         })
-    return TimestampedGeoJson(
+    tgj = TimestampedGeoJson(
         {"type": "FeatureCollection", "features": features},
-        period="PT1H",
+        period="PT24H",
         duration="PT0S",
         transition_time=300,
         loop=False,
-        auto_play=False,
+        auto_play=True,
         add_last_point=True,
     )
+    tgj.default_js = [
+        (
+            "jqueryui1.13.3",
+            "https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.13.3/jquery-ui.min.js",
+        ),
+        (
+            "iso8601",
+            "https://cdn.jsdelivr.net/npm/iso8601-js-period@0.2.1/iso8601.min.js",
+        ),
+        (
+            "leaflet.timedimension",
+            "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.min.js",
+        ),
+        (
+            "moment",
+            "https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.30.1/moment.min.js",
+        ),
+    ]
+    tgj.default_css = [
+        (
+            "leaflet.timedimension_css",
+            "https://cdn.jsdelivr.net/npm/leaflet-timedimension@1.1.1/dist/leaflet.timedimension.control.css",
+        ),
+    ]
+    return tgj
 
 
 def plot_mapa(df_filtrado, rmc_geojson, destaque=None, animacao=False):
     if destaque:
-        mapa = folium.Map(location=[destaque[0], destaque[1]], zoom_start=13)
+        location, zoom = [destaque[0], destaque[1]], 13
     else:
-        mapa = folium.Map(location=[-22.9, -47.05], zoom_start=10)
+        location, zoom = [-22.9, -47.05], 10
+
+    if animacao:
+        mapa = _MapTemporal(location=location, zoom_start=zoom)
+    else:
+        mapa = folium.Map(location=location, zoom_start=zoom)
 
     folium.GeoJson(
         rmc_geojson, name="Limites RMC",
@@ -78,6 +198,13 @@ def plot_mapa(df_filtrado, rmc_geojson, destaque=None, animacao=False):
         marker_cluster.add_to(mapa)
 
         if animacao:
+            mapa.default_js = [
+                (n, LEAFLET_JS_171 if n == "leaflet" else u) for n, u in mapa.default_js
+            ]
+            mapa.default_css = [
+                (n, LEAFLET_CSS_171 if n == "leaflet_css" else u)
+                for n, u in mapa.default_css
+            ]
             layer_temporal(df_filtrado).add_to(mapa)
 
         folium.LayerControl(position="topright").add_to(mapa)
