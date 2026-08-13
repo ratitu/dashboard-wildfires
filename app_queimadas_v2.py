@@ -81,6 +81,17 @@ st.markdown(
     div[data-testid="stMetricDelta"] svg {
         display: none !important;
     }
+    @media (max-width: 700px) {
+        div[data-testid="stMetric"] {
+            padding: 10px;
+        }
+        div[data-testid="stMetricValue"] {
+            font-size: 20px;
+        }
+        div[data-testid="stMetricLabel"] {
+            font-size: 12px;
+        }
+    }
     </style>
     """,
     unsafe_allow_html=True
@@ -270,7 +281,7 @@ if selected == range_label:
                     ),
                     icon=folium.Icon(color="red", icon="fire", icon_color="white")
                 ).add_to(mapa_frp)
-                st_folium(mapa_frp, width=800, height=400)
+                st_folium(mapa_frp, use_container_width=True, height=400)
             else:
                 st.caption("Clique em uma linha da tabela para ver o ponto no mapa.")
 
@@ -453,7 +464,7 @@ if selected == "Município":
                 ),
                 icon=folium.Icon(color="red", icon="fire", icon_color="white")
             ).add_to(mapa_mun)
-            st_folium(mapa_mun, width=800, height=400)
+            st_folium(mapa_mun, use_container_width=True, height=400)
         else:
             st.caption("Clique em uma linha da tabela para ver o ponto no mapa.")
 
@@ -516,7 +527,7 @@ if selected == "Mapa":
                     destaque = (df_pontos.iloc[linha]["Latitude"], df_pontos.iloc[linha]["Longitude"])
 
     mapa = plot_mapa(df_filtrado, rmc_geojson, destaque=destaque, animacao=usar_temporal)
-    st_folium(mapa, width=800, height=500)
+    st_folium(mapa, use_container_width=True, height=500)
 
     if df_pontos is not None:
         st.subheader("Focos Detectados")
