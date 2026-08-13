@@ -148,7 +148,7 @@ if selected == "Início":
         Ele consome automaticamente os dados do <b>INPE</b> (Instituto Nacional de Pesquisas Espaciais) —
         via satélites de referência do Programa Queimadas — abrangendo os <b>últimos {st.session_state.dias} dias</b>,
         disponíveis em
-        <a href="https://dataserver-coids.inpe.br/" target="_blank">dataserver-coids.inpe.br</a>.
+        <a href="https://dataserver-coids.inpe.br/queimadas/queimadas/focos/csv/diario/Brasil/" target="_blank">https://dataserver-coids.inpe.br/queimadas/queimadas/focos/csv/diario/Brasil/</a>.
         </p>
 
         <p>
