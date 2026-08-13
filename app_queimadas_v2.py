@@ -91,11 +91,12 @@ def _ir_para_mapa(municipio):
     st.session_state["municipio_map_selector"] = [municipio]
     st.session_state["pagina_alvo"] = OPCOES.index("Mapa")
 
+
 with st.sidebar:
     _logo_b64 = base64.b64encode(open("logo-no-background.png", "rb").read()).decode()
     st.markdown(
         f'<a href="https://www.instagram.com/passeionamata/" target="_blank">'
-        f'<img src="data:image/png;base64,{_logo_b64}" style="width:100%;">'
+        f'<img src="data:image/png;base64,{_logo_b64}" style="width:50%;">'
         f'</a>',
         unsafe_allow_html=True,
     )
@@ -121,7 +122,9 @@ if selected == "Início":
         Este aplicativo apresenta um <b>painel de monitoramento em tempo quase real</b> dos focos de
         queimadas detectados na <b>Região Metropolitana de Campinas (RMC)</b>.
         Ele consome automaticamente os dados do <b>INPE</b> (Instituto Nacional de Pesquisas Espaciais) —
-        via satélites de referência do Programa Queimadas — abrangendo os <b>últimos {st.session_state.dias} dias</b>.
+        via satélites de referência do Programa Queimadas — abrangendo os <b>últimos {st.session_state.dias} dias</b>,
+        disponíveis em
+        <a href="https://dataserver-coids.inpe.br/" target="_blank">dataserver-coids.inpe.br</a>.
         </p>
 
         <p>
