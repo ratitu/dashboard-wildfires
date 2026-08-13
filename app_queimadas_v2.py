@@ -34,7 +34,14 @@ st.set_page_config(
 if "dias" not in st.session_state:
     st.session_state.dias = 15
 
-df_queimadas, df_anterior, list_municipios, periodo, rmc = load_data(st.session_state.dias)
+df_queimadas, df_anterior, list_municipios, periodo, rmc, servidor_online = load_data(st.session_state.dias)
+
+if not servidor_online:
+    st.error(
+        "O servidor de dados do INPE (**dataserver-coids.inpe.br**) está fora do ar e não é possível "
+        "fazer o download dos dados de focos de queimadas. Tente novamente mais tarde.",
+        icon="🚫",
+    )
 
 agg_municipio, agg_diario, agg_bioma, agg_satelite = calcular_agregacoes(df_queimadas)
 bioma_tem_dados = agg_bioma is not None and not agg_bioma.empty
@@ -90,6 +97,12 @@ ICONES = ["house", "bar-chart", "graph-up", "geo-alt", "search", "map"]
 def _ir_para_mapa(municipio):
     st.session_state["municipio_map_selector"] = [municipio]
     st.session_state["pagina_alvo"] = OPCOES.index("Mapa")
+
+
+def _aviso_sem_dados(msg_online):
+    if not servidor_online:
+        return
+    st.warning(msg_online)
 
 
 with st.sidebar:
@@ -160,7 +173,7 @@ if selected == "Início":
     st.markdown("---")
 
     if df_queimadas is None:
-        st.warning(f"Nenhum foco de queimada detectado na RMC nos últimos {st.session_state.dias} dias.")
+        _aviso_sem_dados(f"Nenhum foco de queimada detectado na RMC nos últimos {st.session_state.dias} dias.")
     else:
         st.markdown(
             f'<p style="font-size:15px;">Panorama dos últimos {st.session_state.dias} dias:</p>',
@@ -267,7 +280,7 @@ if selected == "Análises":
     st.subheader("Análises dos Focos de Queimadas")
 
     if df_queimadas is None:
-        st.warning("Nenhum dado disponível para o período.")
+        _aviso_sem_dados("Nenhum dado disponível para o período.")
     else:
         st.markdown("#### Distribuição por hora do dia")
         st.plotly_chart(fig_horario(df_queimadas), width='stretch')
@@ -339,7 +352,7 @@ if selected == "Municípios e Satélites":
     st.subheader("Distribuição dos Focos por Município e Satélite")
 
     if df_queimadas is None:
-        st.warning("Nenhum dado disponível para o período.")
+        _aviso_sem_dados("Nenhum dado disponível para o período.")
     else:
         col_sel, _, _ = st.columns([1.2, 2, 1])
         with col_sel:
@@ -372,7 +385,7 @@ if selected == "Município":
     st.subheader("Detalhamento por Município")
 
     if df_queimadas is None or not list_municipios:
-        st.warning("Nenhum dado disponível para o período.")
+        _aviso_sem_dados("Nenhum dado disponível para o período.")
     else:
         col_sel, _, _ = st.columns([1.2, 2, 1])
         with col_sel:

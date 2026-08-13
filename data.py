@@ -1,4 +1,5 @@
 import io
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -21,6 +22,17 @@ def _fetch_csv(url):
         return pd.read_csv(io.BytesIO(raw), encoding="utf-8")
     except Exception:
         return None
+
+
+def _servidor_online():
+    try:
+        with urllib.request.urlopen(URL_BASE, timeout=15) as f:
+            f.read(1024)
+        return True
+    except urllib.error.HTTPError:
+        return True
+    except Exception:
+        return False
 
 
 def filtrar_rmc(df, rmc):
@@ -80,25 +92,25 @@ def load_data(dias):
                 registros.append(df)
 
     if not registros:
-        return None, None, None, None, rmc
+        return None, None, None, None, rmc, _servidor_online()
 
     df = pd.concat(registros, ignore_index=True)
     gdf = filtrar_rmc(df, rmc)
 
     if gdf.empty:
-        return None, None, None, None, rmc
+        return None, None, None, None, rmc, True
 
     gdf = preparar_gdf(gdf)
     df_atual, df_anterior = separar_janelas(gdf, dias, hoje)
 
     if df_atual is None:
-        return None, None, None, None, rmc
+        return None, None, None, None, rmc, True
 
     list_municipios = sorted(df_atual["Municipio"].unique())
     data_inicio = df_atual.index.min().strftime("%d/%m/%Y")
     data_fim = df_atual.index.max().strftime("%d/%m/%Y")
 
-    return df_atual, df_anterior, list_municipios, (data_inicio, data_fim), rmc
+    return df_atual, df_anterior, list_municipios, (data_inicio, data_fim), rmc, True
 
 
 def calcular_agregacoes(df):
