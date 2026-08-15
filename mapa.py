@@ -160,7 +160,7 @@ def layer_temporal(df):
     return tgj
 
 
-def plot_mapa(df_filtrado, rmc_geojson, destaque=None, animacao=False):
+def plot_mapa(df_filtrado, rmc_geojson, destaque=None, animacao=False, pontos_individuais=False):
     if destaque:
         location, zoom = [destaque[0], destaque[1]], 13
     else:
@@ -177,8 +177,22 @@ def plot_mapa(df_filtrado, rmc_geojson, destaque=None, animacao=False):
     ).add_to(mapa)
 
     if df_filtrado is not None and not df_filtrado.empty:
-        heat_data = df_filtrado[["Latitude", "Longitude"]].values.tolist()
-        HeatMap(heat_data, radius=10, name="Mapa de Calor", blur=10).add_to(mapa)
+        if pontos_individuais:
+            fg = folium.FeatureGroup(name="Focos Individuais")
+            for idx, row in df_filtrado.iterrows():
+                folium.CircleMarker(
+                    location=[row["Latitude"], row["Longitude"]],
+                    radius=4,
+                    color="#e63946",
+                    fill=True,
+                    fillColor="#e63946",
+                    fillOpacity=0.8,
+                    popup=folium.Popup(_popup_html(idx, row), max_width=300),
+                ).add_to(fg)
+            fg.add_to(mapa)
+        else:
+            heat_data = df_filtrado[["Latitude", "Longitude"]].values.tolist()
+            HeatMap(heat_data, radius=10, name="Mapa de Calor", blur=10).add_to(mapa)
 
         folium.TileLayer(
             tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -188,14 +202,15 @@ def plot_mapa(df_filtrado, rmc_geojson, destaque=None, animacao=False):
             control=True,
         ).add_to(mapa)
 
-        marker_cluster = MarkerCluster(name="Focos de Queimadas")
-        for idx, row in df_filtrado.iterrows():
-            folium.Marker(
-                location=[row["Latitude"], row["Longitude"]],
-                popup=folium.Popup(_popup_html(idx, row), max_width=300),
-                icon=folium.Icon(color="red", icon="fire", icon_color="white"),
-            ).add_to(marker_cluster)
-        marker_cluster.add_to(mapa)
+        if not pontos_individuais:
+            marker_cluster = MarkerCluster(name="Focos de Queimadas")
+            for idx, row in df_filtrado.iterrows():
+                folium.Marker(
+                    location=[row["Latitude"], row["Longitude"]],
+                    popup=folium.Popup(_popup_html(idx, row), max_width=300),
+                    icon=folium.Icon(color="red", icon="fire", icon_color="white"),
+                ).add_to(marker_cluster)
+            marker_cluster.add_to(mapa)
 
         if animacao:
             mapa.default_js = [
