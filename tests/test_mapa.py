@@ -3,6 +3,9 @@
 Cobre os dois modos de `plot_mapa`:
 (a) OFF (default): HeatMap + MarkerCluster + Esri Satellite + LayerControl.
 (b) ON: FeatureGroup "Focos Individuais" com CircleMarkers, sem HeatMap/MarkerCluster.
+(c) Bordas: None/DataFrame vazio × ON/OFF → sem exceção e sem camadas de focos.
+(d) ON + animação: TimestampedGeoJson coexiste com "Focos Individuais".
+(e) ON + destaque: Marker de destaque com popup "Foco selecionado na tabela".
 
 A fixture é construída inline (sem importar `app_queimadas_v2.py` nem `data.py`,
 que disparariam download do INPE / dependências pesadas).
@@ -10,6 +13,7 @@ que disparariam download do INPE / dependências pesadas).
 
 import folium
 import pandas as pd
+import pytest
 
 from mapa import plot_mapa
 
@@ -110,3 +114,63 @@ def test_on_focos_individuais():
     # Modo ON substitui HeatMap/MarkerCluster
     assert not any(cls == "HeatMap" for cls, nome in camadas)
     assert not any(cls == "MarkerCluster" for cls, nome in camadas)
+
+
+def _contem_texto(elemento, texto):
+    """Busca recursiva por `texto` na árvore de elementos do folium.
+
+    Em folium 0.19.4 o texto do popup fica em um elemento `Html` (com atributo
+    `.data`) dentro de `popup.html._children` — não é uma string direta.
+    """
+    if isinstance(elemento, str):
+        return texto in elemento
+    if texto in str(getattr(elemento, "data", "")):
+        return True
+    return any(
+        _contem_texto(v, texto)
+        for v in getattr(elemento, "_children", {}).values()
+    )
+
+
+@pytest.mark.parametrize("df", [None, pd.DataFrame()])
+@pytest.mark.parametrize("pontos_individuais", [True, False])
+def test_bordas_none_vazio_sem_camadas_de_focos(df, pontos_individuais):
+    """None/DataFrame vazio × ON/OFF: sem exceção e sem camadas de focos."""
+    mapa = plot_mapa(df, RMC_GEOJSON, pontos_individuais=pontos_individuais)
+    camadas = coletar_camadas(mapa)
+
+    assert not any(nome == "Focos Individuais" for cls, nome in camadas)
+    assert not any(cls == "HeatMap" for cls, nome in camadas)
+    assert not any(cls == "MarkerCluster" for cls, nome in camadas)
+
+
+def test_on_animacao_temporal_coexiste_com_focos_individuais():
+    """ON + animação: TimestampedGeoJson presente JUNTO com 'Focos Individuais'."""
+    mapa = plot_mapa(
+        fixture_df(), RMC_GEOJSON, pontos_individuais=True, animacao=True
+    )
+    camadas = coletar_camadas(mapa)
+
+    assert any(cls == "TimestampedGeoJson" for cls, nome in camadas)
+    assert feature_group_focos(mapa) is not None
+
+
+def test_on_destaque_marker_com_popup():
+    """ON + destaque: Marker cujo popup contém 'Foco selecionado na tabela'."""
+    df = fixture_df()
+    destaque = (df["Latitude"].iloc[0], df["Longitude"].iloc[0])
+    mapa = plot_mapa(
+        df, RMC_GEOJSON, pontos_individuais=True, destaque=destaque
+    )
+
+    marcadores = [
+        v for v in mapa._children.values() if isinstance(v, folium.Marker)
+    ]
+    assert len(marcadores) == 1
+    m = marcadores[0]
+    # Popup fica em _children sob chave gerada (popup_<uuid>)
+    popups = [
+        v for v in m._children.values() if isinstance(v, folium.Popup)
+    ]
+    assert len(popups) == 1
+    assert _contem_texto(popups[0].html, "Foco selecionado na tabela")
