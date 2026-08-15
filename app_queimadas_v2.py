@@ -500,6 +500,11 @@ if selected == "Mapa":
                 disabled=True
             )
         usar_temporal = st.checkbox("Animação temporal (dia a dia)", key="animacao_temporal")
+        focos_individuais = st.checkbox(
+            "Exibir focos individualmente (pontos vermelhos)",
+            key="focos_individuais",
+            value=False,
+        )
 
     if periodo:
         st.markdown(f"**Período:** {periodo[0]} a {periodo[1]}")
@@ -526,7 +531,7 @@ if selected == "Mapa":
                     linha = linhas[0]
                     destaque = (df_pontos.iloc[linha]["Latitude"], df_pontos.iloc[linha]["Longitude"])
 
-    mapa = plot_mapa(df_filtrado, rmc_geojson, destaque=destaque, animacao=usar_temporal)
+    mapa = plot_mapa(df_filtrado, rmc_geojson, destaque=destaque, animacao=usar_temporal, pontos_individuais=focos_individuais)
     st_folium(mapa, use_container_width=True, height=500)
 
     if df_pontos is not None:
